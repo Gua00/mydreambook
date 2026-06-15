@@ -1,23 +1,21 @@
 "use client";
 
 import { useParams, useRouter } from "next/navigation";
-import { useEffect, useRef, useCallback, useState } from "react";
+import { useEffect, useRef, useState, useMemo } from "react";
 import { ArrowLeft, Download } from "lucide-react";
 import { useBookStore } from "@/stores/bookStore";
 import { useEditorStore } from "@/stores/editorStore";
-import { useUIStore } from "@/stores/uiStore";
 import { ToolBar } from "@/components/ToolBar";
 import { PageThumbnails } from "@/components/PageThumbnails";
 import { CanvasEditor } from "@/components/CanvasEditor";
 import { DoodleCanvas } from "@/components/DoodleCanvas";
-import { generateId, now, cn } from "@/lib/utils";
+import { generateId } from "@/lib/utils";
 import type {
   PageElement,
   PageElementType,
   TextElementData,
   ImageElementData,
   DoodleElementData,
-  ImageFilter,
 } from "@/types";
 
 /** 风格 CSS 类映射 */
@@ -33,31 +31,48 @@ export default function EditPage() {
   const router = useRouter();
   const bookId = params.id as string;
 
+  // 订阅书信息
   const book = useBookStore((s) => s.books.find((b) => b.id === bookId));
   const updateBook = useBookStore((s) => s.updateBook);
-  const {
-    pages, currentPage, selectedElements,
-    addPage, removePage, setCurrentPage,
-    addElement, updateElement, removeElement,
-    selectElement, clearSelection,
-    pushUndo, undo, redo,
-  } = useEditorStore();
+
+  // 订阅编辑器状态（使用选择器确保响应式）
+  const pages = useEditorStore((s) => s.pages);
+  const currentPage = useEditorStore((s) => s.currentPage);
+  const selectedElements = useEditorStore((s) => s.selectedElements);
+  const undoStackLen = useEditorStore((s) => s.undoStack.length);
+  const redoStackLen = useEditorStore((s) => s.redoStack.length);
+  const addPage = useEditorStore((s) => s.addPage);
+  const removePage = useEditorStore((s) => s.removePage);
+  const setCurrentPage = useEditorStore((s) => s.setCurrentPage);
+  const addElement = useEditorStore((s) => s.addElement);
+  const updateElement = useEditorStore((s) => s.updateElement);
+  const removeElement = useEditorStore((s) => s.removeElement);
+  const selectElement = useEditorStore((s) => s.selectElement);
+  const clearSelection = useEditorStore((s) => s.clearSelection);
+  const pushUndo = useEditorStore((s) => s.pushUndo);
+  const undo = useEditorStore((s) => s.undo);
+  const redo = useEditorStore((s) => s.redo);
 
   const [showDoodle, setShowDoodle] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // 书籍的页面列表
-  const bookPages = pages.filter((p) => p.bookId === bookId);
-  const currentPageData = bookPages[currentPage];
+  // 筛选本书的页面，按 pageNumber 排序
+  const bookPages = useMemo(
+    () => pages.filter((p) => p.bookId === bookId).sort((a, b) => a.pageNumber - b.pageNumber),
+    [pages, bookId]
+  );
+
+  // 当前页数据：使用 currentPage 作为 bookPages 的索引（现在 pageNumber 即书内索引）
+  const currentPageData = bookPages[currentPage] ?? bookPages[0];
 
   // 确保至少有一页
   useEffect(() => {
-    if (bookPages.length === 0) {
+    if (bookPages.length === 0 && book) {
       addPage(bookId);
     }
-  }, [bookId, bookPages.length, addPage]);
+  }, [bookId, bookPages.length, addPage, book]);
 
-  // 如果书不存在，跳回首页
+  // 书不存在时跳回首页
   useEffect(() => {
     if (!book && useBookStore.getState().books.length > 0) {
       router.push("/");
@@ -73,7 +88,9 @@ export default function EditPage() {
   }
 
   const styleClass = styleClassMap[book.style] || "theme-light";
-  const bookPageCount = bookPages.length;
+
+  /** 获取当前正在操作的 pageNumber */
+  const activePageNumber = currentPageData?.pageNumber ?? currentPage;
 
   /** 创建快照（用于撤销） */
   const takeSnapshot = () => {
@@ -112,15 +129,31 @@ export default function EditPage() {
         color: "#4a3728",
       } as TextElementData,
     };
-    addElement(currentPage, element);
+    addElement(activePageNumber, element);
   };
 
   /** 图片上传处理 */
   const handleImageFile = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
-    if (!file || !currentPageData) return;
+    if (!file) return;
+    if (!currentPageData) {
+      addPage(bookId);
+      // 等待页面创建完成后再添加图片
+      setTimeout(() => {
+        const st = useEditorStore.getState();
+        const bp = st.pages.filter((p) => p.bookId === bookId);
+        const lastPage = bp[bp.length - 1];
+        if (lastPage) addImageToPage(lastPage.pageNumber, file);
+      }, 100);
+      return;
+    }
     takeSnapshot();
+    addImageToPage(activePageNumber, file);
+    if (fileInputRef.current) fileInputRef.current.value = "";
+  };
 
+  /** 将图片文件转为元素 */
+  const addImageToPage = (pageNum: number, file: File) => {
     const reader = new FileReader();
     reader.onload = (ev) => {
       const element: PageElement = {
@@ -130,12 +163,14 @@ export default function EditPage() {
         y: 80,
         width: 350,
         height: 250,
-        data: { src: ev.target?.result as string, filter: { brightness: 100, contrast: 100, saturation: 100 } } as ImageElementData,
+        data: {
+          src: ev.target?.result as string,
+          filter: { brightness: 100, contrast: 100, saturation: 100 },
+        } as ImageElementData,
       };
-      addElement(currentPage, element);
+      addElement(pageNum, element);
     };
     reader.readAsDataURL(file);
-    if (fileInputRef.current) fileInputRef.current.value = "";
   };
 
   /** 涂鸦保存 */
@@ -151,22 +186,32 @@ export default function EditPage() {
       height: 300,
       data: { svgPath, strokeColor, strokeWidth } as DoodleElementData,
     };
-    addElement(currentPage, element);
+    addElement(activePageNumber, element);
   };
 
-  /** 更新元素（带快照） */
+  /** 更新元素 */
   const handleUpdateElement = (elementId: string, changes: Partial<PageElement>) => {
     if (currentPageData == null) return;
-    updateElement(currentPage, elementId, changes);
+    updateElement(activePageNumber, elementId, changes);
   };
 
   /** 删除选中元素 */
   const handleDeleteSelected = () => {
     if (!currentPageData) return;
     takeSnapshot();
-    selectedElements.forEach((id) => removeElement(currentPage, id));
+    selectedElements.forEach((id) => removeElement(activePageNumber, id));
     clearSelection();
   };
+
+  /** 选中元素信息 */
+  const selectedEl = currentPageData?.content.elements.find(
+    (el) => selectedElements.includes(el.id)
+  );
+  const selectedType = selectedEl?.type;
+  const selectedTextData =
+    selectedType === "text" ? (selectedEl?.data as TextElementData) : undefined;
+  const selectedImageData =
+    selectedType === "image" ? (selectedEl?.data as ImageElementData) : undefined;
 
   /** 导出当前页为 PNG */
   const handleExportPage = async () => {
@@ -184,17 +229,9 @@ export default function EditPage() {
     }
   };
 
-  // 选中元素信息
-  const selectedEl = currentPageData?.content.elements.find(
-    (el) => selectedElements.includes(el.id)
-  );
-  const selectedType = selectedEl?.type;
-  const selectedTextData = selectedType === "text" ? (selectedEl?.data as TextElementData) : undefined;
-  const selectedImageData = selectedType === "image" ? (selectedEl?.data as ImageElementData) : undefined;
-
   return (
     <div className="flex-1 flex flex-col h-[calc(100vh-3.5rem)]">
-      {/* 顶部栏：书名 + 返回 */}
+      {/* 顶部栏 */}
       <div className="flex items-center gap-3 px-4 py-2 bg-white border-b border-stone-200">
         <button
           onClick={() => router.push("/")}
@@ -204,7 +241,10 @@ export default function EditPage() {
           书架
         </button>
         <div className="w-px h-4 bg-stone-200" />
-        <h1 className="text-sm font-bold text-stone-800 truncate max-w-xs">{book.title}</h1>
+        <h1 className="text-sm font-bold text-stone-800 truncate max-w-xs">
+          {book.title}
+        </h1>
+        <span className="text-xs text-stone-400">{bookPages.length} 页</span>
         <div className="flex-1" />
         <button
           onClick={handleExportPage}
@@ -215,31 +255,50 @@ export default function EditPage() {
         </button>
       </div>
 
-      {/* 工具栏 */}
+      {/* 工具栏（现在 canUndo/canRedo 是响应式的） */}
       <ToolBar
         onAddElement={handleAddElement}
         onUndo={undo}
         onRedo={redo}
         onDeleteSelected={handleDeleteSelected}
-        canUndo={useEditorStore.getState().undoStack.length > 0}
-        canRedo={useEditorStore.getState().redoStack.length > 0}
+        canUndo={undoStackLen > 0}
+        canRedo={redoStackLen > 0}
         hasSelection={selectedElements.length > 0}
         selectedType={selectedType}
         currentFont={selectedTextData?.font}
         currentFontSize={selectedTextData?.size}
         currentColor={selectedTextData?.color}
-        onFontChange={(font) => selectedEl && handleUpdateElement(selectedEl.id, { data: { ...selectedEl.data, font } as TextElementData })}
-        onFontSizeChange={(size) => selectedEl && handleUpdateElement(selectedEl.id, { data: { ...selectedEl.data, size } as TextElementData })}
-        onColorChange={(color) => selectedEl && handleUpdateElement(selectedEl.id, { data: { ...selectedEl.data, color } as TextElementData })}
+        onFontChange={(font) =>
+          selectedEl &&
+          handleUpdateElement(selectedEl.id, {
+            data: { ...selectedEl.data, font },
+          } as Partial<PageElement>)
+        }
+        onFontSizeChange={(size) =>
+          selectedEl &&
+          handleUpdateElement(selectedEl.id, {
+            data: { ...selectedEl.data, size },
+          } as Partial<PageElement>)
+        }
+        onColorChange={(color) =>
+          selectedEl &&
+          handleUpdateElement(selectedEl.id, {
+            data: { ...selectedEl.data, color },
+          } as Partial<PageElement>)
+        }
         currentFilter={selectedImageData?.filter}
-        onFilterChange={(filter) => selectedEl && handleUpdateElement(selectedEl.id, { data: { ...selectedEl.data, filter } as ImageElementData })}
+        onFilterChange={(filter) =>
+          selectedEl &&
+          handleUpdateElement(selectedEl.id, {
+            data: { ...selectedEl.data, filter },
+          } as Partial<PageElement>)
+        }
         currentStyle={book.style}
         onStyleChange={(style) => updateBook(bookId, { style })}
       />
 
       {/* 主编辑区 */}
       <div className="flex-1 flex overflow-hidden">
-        {/* 左侧缩略图 */}
         <PageThumbnails
           pages={bookPages}
           currentPage={currentPage}
@@ -248,21 +307,21 @@ export default function EditPage() {
           onDeletePage={removePage}
         />
 
-        {/* 画布 */}
         {currentPageData && (
           <CanvasEditor
+            key={`${bookId}-${currentPage}`}
             page={currentPageData}
             selectedElements={selectedElements}
             onSelectElement={selectElement}
             onClearSelection={clearSelection}
             onUpdateElement={handleUpdateElement}
-            onRemoveElement={(id) => removeElement(currentPage, id)}
-            onAddElement={(el) => addElement(currentPage, el)}
+            onRemoveElement={(id) => removeElement(activePageNumber, id)}
+            onAddElement={(el) => addElement(activePageNumber, el)}
             styleClass={styleClass}
           />
         )}
 
-        {/* 隐藏的图片上传 */}
+        {/* 隐藏的图片上传 input — 唯一入口 */}
         <input
           ref={fileInputRef}
           type="file"

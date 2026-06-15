@@ -40,16 +40,17 @@ export const useEditorStore = create<EditorState>()(
       redoStack: [],
 
       addPage: (bookId) => {
-        const pageNum = get().pages.length
+        // 使用书内局部页码，而非全局页数
+        const bookPageCount = get().pages.filter((p) => p.bookId === bookId).length
         const page: Page = {
           id: generateId(),
           bookId,
-          pageNumber: pageNum,
+          pageNumber: bookPageCount,
           content: { elements: [] },
           createdAt: now(),
           updatedAt: now(),
         }
-        set((s) => ({ pages: [...s.pages, page], currentPage: pageNum }))
+        set((s) => ({ pages: [...s.pages, page], currentPage: bookPageCount }))
       },
 
       removePage: (pageId) => {
