@@ -40,7 +40,7 @@ export function BookCard({ book, pageCount, onDelete }: BookCardProps) {
   const cover = styleCovers[book.style] || styleCovers.light;
 
   return (
-    <div className="group relative animate-fade-in">
+    <div className="group relative animate-card-entrance">
       {/* 删除按钮 */}
       <button
         onClick={(e) => {
@@ -94,17 +94,17 @@ export function BookCard({ book, pageCount, onDelete }: BookCardProps) {
         </div>
 
         {/* 操作栏 */}
-        <div className="flex items-center divide-x divide-stone-100 border-t border-stone-100 bg-white">
+        <div className="flex items-center divide-x divide-stone-100 dark:divide-stone-700 border-t border-stone-100 dark:border-stone-700 bg-white dark:bg-stone-800">
           <Link
             href={`/book/${book.id}/read`}
-            className="flex-1 flex items-center justify-center gap-1 py-2.5 text-sm text-stone-600 hover:text-amber-700 hover:bg-amber-50 transition-colors"
+            className="flex-1 flex items-center justify-center gap-1 py-2.5 text-sm text-stone-600 dark:text-stone-300 hover:text-amber-700 dark:hover:text-amber-400 hover:bg-amber-50 dark:hover:bg-amber-950 transition-colors"
           >
             <Eye className="size-3.5" />
             <span>阅读</span>
           </Link>
           <Link
             href={`/book/${book.id}/edit`}
-            className="flex-1 flex items-center justify-center gap-1 py-2.5 text-sm text-stone-600 hover:text-amber-700 hover:bg-amber-50 transition-colors"
+            className="flex-1 flex items-center justify-center gap-1 py-2.5 text-sm text-stone-600 dark:text-stone-300 hover:text-amber-700 dark:hover:text-amber-400 hover:bg-amber-50 dark:hover:bg-amber-950 transition-colors"
           >
             <Edit3 className="size-3.5" />
             <span>编辑</span>

@@ -1,9 +1,16 @@
 "use client";
 
-import { useState, useRef, useEffect, useCallback } from "react";
-import type { Page, PageElement, TextElementData, ImageElementData, DoodleElementData } from "@/types";
+import { useState, useRef, useCallback, useEffect } from "react";
+import dynamic from "next/dynamic";
+import type { Page, TextElementData, ImageElementData, DoodleElementData } from "@/types";
 import { cn } from "@/lib/utils";
-import { ChevronLeft, ChevronRight } from "lucide-react";
+import { ChevronLeft, ChevronRight, BookOpen } from "lucide-react";
+
+// react-pageflip 依赖 DOM API，需要动态导入
+const HTMLFlipBook = dynamic(
+  () => import("react-pageflip"),
+  { ssr: false }
+) as any;
 
 interface BookReaderProps {
   pages: Page[];
@@ -11,22 +18,16 @@ interface BookReaderProps {
   flipMode: "3d" | "swipe";
 }
 
-/** 渲染单个页面内容 */
-function PageContent({ page, styleClass }: { page: Page; styleClass: string }) {
+/* ──────────── 单页内容渲染 ──────────── */
+function PageFace({ page, styleClass }: { page: Page; styleClass: string }) {
   return (
-    <div className={cn("relative w-full h-full overflow-hidden", styleClass)}>
+    <div className={cn("w-full h-full overflow-hidden relative", styleClass)}>
       {page.content.elements.map((el) => (
         <div
           key={el.id}
           className="absolute"
-          style={{
-            left: el.x,
-            top: el.y,
-            width: el.width,
-            height: el.height,
-          }}
+          style={{ left: el.x, top: el.y, width: el.width, height: el.height }}
         >
-          {/* 文字 */}
           {el.type === "text" && (
             <div
               className="w-full h-full overflow-hidden whitespace-pre-wrap p-1 select-none"
@@ -40,7 +41,6 @@ function PageContent({ page, styleClass }: { page: Page; styleClass: string }) {
             </div>
           )}
 
-          {/* 图片 */}
           {el.type === "image" && (
             <div className="w-full h-full overflow-hidden rounded">
               <img
@@ -59,8 +59,7 @@ function PageContent({ page, styleClass }: { page: Page; styleClass: string }) {
             </div>
           )}
 
-          {/* 涂鸦 */}
-          {el.type === "doodle" && "data" in el && (
+          {el.type === "doodle" && (
             <img
               src={(el.data as DoodleElementData).svgPath}
               alt="涂鸦"
@@ -71,136 +70,111 @@ function PageContent({ page, styleClass }: { page: Page; styleClass: string }) {
         </div>
       ))}
 
-      {/* 空页面 */}
       {page.content.elements.length === 0 && (
-        <div className="absolute inset-0 flex items-center justify-center opacity-30 select-none">
-          <p className="text-lg">空白页</p>
+        <div className="absolute inset-0 flex items-center justify-center opacity-25 select-none pointer-events-none">
+          <p className="text-sm">空白页</p>
         </div>
       )}
 
-      {/* 页码 */}
-      <div className="absolute bottom-3 left-1/2 -translate-x-1/2 text-xs opacity-40 select-none">
-        第 {page.pageNumber + 1} 页
+      <div className="absolute bottom-2 left-1/2 -translate-x-1/2 text-[10px] opacity-30 select-none pointer-events-none">
+        {page.pageNumber + 1}
       </div>
     </div>
   );
 }
 
-/** 3D 翻页阅读器组件 */
-function FlipBookReader({ pages, styleClass }: { pages: Page[]; styleClass: string }) {
-  const bookRef = useRef<HTMLDivElement>(null);
+/* ──────────── React-PageFlip 3D 翻书模式 ──────────── */
+function FlipBook({ pages, styleClass }: { pages: Page[]; styleClass: string }) {
+  const bookRef = useRef<any>(null);
   const [currentPage, setCurrentPage] = useState(0);
-  const [isFlipping, setIsFlipping] = useState(false);
-  const [flipDirection, setFlipDirection] = useState<"left" | "right" | null>(null);
-  const [flipProgress, setFlipProgress] = useState(0);
-
   const totalPages = pages.length;
 
-  /** CSS 3D 翻页动画 */
-  const flipToPage = useCallback(
-    (target: number) => {
-      if (target < 0 || target >= totalPages || isFlipping) return;
-      setIsFlipping(true);
-      setFlipDirection(target > currentPage ? "left" : "right");
+  const onFlip = useCallback((e: any) => {
+    setCurrentPage(e.data);
+  }, []);
 
-      // 动画过程
-      const duration = 600;
-      const startTime = Date.now();
-      const startPage = currentPage;
+  const goToPage = (n: number) => {
+    if (n >= 0 && n < totalPages) {
+      bookRef.current?.pageFlip()?.flip(n);
+    }
+  };
 
-      const animate = () => {
-        const elapsed = Date.now() - startTime;
-        const progress = Math.min(elapsed / duration, 1);
-        // easeInOutCubic
-        const eased = progress < 0.5
-          ? 4 * progress * progress * progress
-          : 1 - Math.pow(-2 * progress + 2, 3) / 2;
-        setFlipProgress(eased);
-
-        if (progress < 1) {
-          requestAnimationFrame(animate);
-        } else {
-          setCurrentPage(target);
-          setIsFlipping(false);
-          setFlipDirection(null);
-          setFlipProgress(0);
-        }
-      };
-
-      requestAnimationFrame(animate);
-    },
-    [currentPage, totalPages, isFlipping]
-  );
+  // 响应翻页按钮
+  const goNext = () => goToPage(currentPage + 1);
+  const goPrev = () => goToPage(currentPage - 1);
 
   return (
-    <div className="flex-1 flex items-center justify-center p-4 bg-stone-800/50">
-      <div className="flex items-center gap-4 max-w-4xl w-full">
-        {/* 左翻页按钮 */}
+    <div className="flex-1 flex flex-col items-center justify-center p-4 bg-stone-100 dark:bg-stone-950 select-none">
+      {/* 按钮 + 书本容器 */}
+      <div className="flex items-center gap-4 w-full max-w-[1000px] justify-center">
         <button
-          onClick={() => flipToPage(currentPage - 1)}
-          disabled={currentPage === 0 || isFlipping}
-          className="p-3 rounded-full bg-white/10 text-white hover:bg-white/20 disabled:opacity-30 transition-all"
+          onClick={goPrev}
+          disabled={currentPage <= 0}
+          className="p-3 rounded-full bg-white dark:bg-stone-800 shadow-md text-stone-600 dark:text-stone-300 hover:bg-amber-50 dark:hover:bg-stone-700 hover:scale-105 disabled:opacity-25 disabled:hover:scale-100 transition-all shrink-0"
           aria-label="上一页"
         >
-          <ChevronLeft className="size-6" />
+          <ChevronLeft className="size-5" />
         </button>
 
-        {/* 书页 */}
-        <div ref={bookRef} className="flex-1 flex justify-center perspective-[1200px]">
-          <div
-            className={cn(
-              "relative w-full max-w-[700px] book-shadow rounded-r-xl overflow-hidden transition-transform",
-              isFlipping && flipDirection === "left" && "origin-left"
-            )}
-            style={{
-              aspectRatio: "4/5",
-              transform: isFlipping
-                ? `rotateY(${flipDirection === "left" ? -flipProgress * 180 : flipProgress * 180}deg)`
-                : "none",
-              transformStyle: "preserve-3d",
-              transition: isFlipping ? "none" : "transform 0.3s",
-            }}
-          >
-            {/* 当前页（正面） */}
-            <div
-              className="absolute inset-0"
-              style={{ backfaceVisibility: "hidden" }}
+        <div className="flex-1 flex justify-center overflow-hidden">
+          {typeof window !== "undefined" && (
+            <HTMLFlipBook
+              ref={bookRef}
+              width={400}
+              height={500}
+              size="stretch"
+              minWidth={250}
+              maxWidth={550}
+              minHeight={320}
+              maxHeight={700}
+              maxShadowOpacity={0.4}
+              showCover={true}
+              mobileScrollSupport={true}
+              onFlip={onFlip}
+              className="book-shadow"
+              style={{}}
+              startPage={0}
+              drawShadow={true}
+              flippingTime={800}
+              usePortrait={false}
+              startZIndex={0}
+              autoSize={true}
+              useMouseEvents={true}
+              swipeDistance={30}
+              showPageCorners={true}
+              disableFlipByClick={false}
             >
-              {pages[currentPage] && (
-                <PageContent page={pages[currentPage]} styleClass={styleClass} />
-              )}
-            </div>
-
-            {/* 下一页（背面，翻转时可见） */}
-            {flipDirection === "left" && pages[currentPage + 1] && (
-              <div
-                className="absolute inset-0"
-                style={{
-                  backfaceVisibility: "hidden",
-                  transform: "rotateY(180deg)",
-                }}
-              >
-                <PageContent page={pages[currentPage + 1]} styleClass={styleClass} />
-              </div>
-            )}
-          </div>
+              {pages.map((page) => (
+                <div key={page.id} className="w-full h-full">
+                  <PageFace page={page} styleClass={styleClass} />
+                </div>
+              ))}
+            </HTMLFlipBook>
+          )}
         </div>
 
-        {/* 右翻页按钮 */}
         <button
-          onClick={() => flipToPage(currentPage + 1)}
-          disabled={currentPage >= totalPages - 1 || isFlipping}
-          className="p-3 rounded-full bg-white/10 text-white hover:bg-white/20 disabled:opacity-30 transition-all"
+          onClick={goNext}
+          disabled={currentPage >= totalPages - 1}
+          className="p-3 rounded-full bg-white dark:bg-stone-800 shadow-md text-stone-600 dark:text-stone-300 hover:bg-amber-50 dark:hover:bg-stone-700 hover:scale-105 disabled:opacity-25 disabled:hover:scale-100 transition-all shrink-0"
           aria-label="下一页"
         >
-          <ChevronRight className="size-6" />
+          <ChevronRight className="size-5" />
         </button>
+      </div>
+
+      {/* 页码指示 */}
+      <div className="mt-4 flex items-center gap-2 text-xs text-stone-400 dark:text-stone-500">
+        <BookOpen className="size-3" />
+        <span>{currentPage + 1}</span>
+        <span>/</span>
+        <span>{totalPages}</span>
       </div>
     </div>
   );
 }
 
-/** 滑动模式阅读器 */
+/* ──────────── 滑动模式 ──────────── */
 function SwipeReader({ pages, styleClass }: { pages: Page[]; styleClass: string }) {
   const [currentPage, setCurrentPage] = useState(0);
   const [touchStart, setTouchStart] = useState(0);
@@ -215,41 +189,24 @@ function SwipeReader({ pages, styleClass }: { pages: Page[]; styleClass: string 
     setTranslateX(0);
   };
 
-  const handleTouchStart = (e: React.TouchEvent) => {
-    setTouchStart(e.touches[0].clientX);
-    setIsSwiping(true);
-  };
-
-  const handleTouchMove = (e: React.TouchEvent) => {
-    if (!isSwiping) return;
-    const diff = e.touches[0].clientX - touchStart;
-    setTranslateX(diff);
-  };
-
-  const handleTouchEnd = () => {
-    setIsSwiping(false);
-    if (Math.abs(translateX) > 80) {
-      if (translateX > 0) {
-        goToPage(currentPage - 1);
-      } else {
-        goToPage(currentPage + 1);
-      }
-    }
-    setTranslateX(0);
-  };
-
   return (
     <div
-      className="flex-1 flex items-center justify-center p-4 bg-stone-200/50 overflow-hidden"
-      onTouchStart={handleTouchStart}
-      onTouchMove={handleTouchMove}
-      onTouchEnd={handleTouchEnd}
+      className="flex-1 flex items-center justify-center p-4 bg-stone-200/50 dark:bg-stone-900/50 overflow-hidden"
+      onTouchStart={(e) => { setTouchStart(e.touches[0].clientX); setIsSwiping(true); }}
+      onTouchMove={(e) => { if (isSwiping) setTranslateX(e.touches[0].clientX - touchStart); }}
+      onTouchEnd={() => {
+        setIsSwiping(false);
+        if (Math.abs(translateX) > 80) {
+          translateX > 0 ? goToPage(currentPage - 1) : goToPage(currentPage + 1);
+        }
+        setTranslateX(0);
+      }}
     >
       <div className="flex items-center gap-4 max-w-4xl w-full">
         <button
           onClick={() => goToPage(currentPage - 1)}
           disabled={currentPage === 0}
-          className="p-3 rounded-full bg-white shadow-sm text-stone-600 hover:bg-amber-50 hover:text-amber-700 disabled:opacity-30 transition-all"
+          className="p-3 rounded-full bg-white dark:bg-stone-800 shadow-sm text-stone-600 dark:text-stone-300 hover:bg-amber-50 dark:hover:bg-stone-700 disabled:opacity-30 transition-all shrink-0"
           aria-label="上一页"
         >
           <ChevronLeft className="size-6" />
@@ -268,7 +225,7 @@ function SwipeReader({ pages, styleClass }: { pages: Page[]; styleClass: string 
                 className="w-full shrink-0 book-shadow rounded-xl overflow-hidden"
                 style={{ aspectRatio: "4/5" }}
               >
-                <PageContent page={page} styleClass={styleClass} />
+                <PageFace page={page} styleClass={styleClass} />
               </div>
             ))}
           </div>
@@ -277,24 +234,24 @@ function SwipeReader({ pages, styleClass }: { pages: Page[]; styleClass: string 
         <button
           onClick={() => goToPage(currentPage + 1)}
           disabled={currentPage >= totalPages - 1}
-          className="p-3 rounded-full bg-white shadow-sm text-stone-600 hover:bg-amber-50 hover:text-amber-700 disabled:opacity-30 transition-all"
+          className="p-3 rounded-full bg-white dark:bg-stone-800 shadow-sm text-stone-600 dark:text-stone-300 hover:bg-amber-50 dark:hover:bg-stone-700 disabled:opacity-30 transition-all shrink-0"
           aria-label="下一页"
         >
           <ChevronRight className="size-6" />
         </button>
       </div>
 
-      {/* 滑动指示器 */}
+      {/* 圆点指示器 */}
       <div className="absolute bottom-4 left-1/2 -translate-x-1/2 flex items-center gap-1.5">
         {pages.map((_, i) => (
           <button
             key={i}
             onClick={() => goToPage(i)}
             className={cn(
-              "w-2 h-2 rounded-full transition-all",
+              "w-2 h-2 rounded-full transition-all duration-300",
               i === currentPage
                 ? "bg-amber-500 w-4"
-                : "bg-stone-300 hover:bg-stone-400"
+                : "bg-stone-300 dark:bg-stone-600 hover:bg-stone-400"
             )}
           />
         ))}
@@ -303,12 +260,12 @@ function SwipeReader({ pages, styleClass }: { pages: Page[]; styleClass: string 
   );
 }
 
-/** 阅读器容器 — 根据 flipMode 切换 3D 翻页 / 滑动模式 */
+/* ──────────── 阅读器入口 ──────────── */
 export function BookReader({ pages, styleClass, flipMode }: BookReaderProps) {
   if (pages.length === 0) {
     return (
       <div className="flex-1 flex items-center justify-center">
-        <p className="text-stone-500">这本书还没有页面</p>
+        <p className="text-stone-500 dark:text-stone-400">这本书还没有页面</p>
       </div>
     );
   }
@@ -317,5 +274,5 @@ export function BookReader({ pages, styleClass, flipMode }: BookReaderProps) {
     return <SwipeReader pages={pages} styleClass={styleClass} />;
   }
 
-  return <FlipBookReader pages={pages} styleClass={styleClass} />;
+  return <FlipBook pages={pages} styleClass={styleClass} />;
 }

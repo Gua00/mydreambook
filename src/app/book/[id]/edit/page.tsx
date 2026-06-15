@@ -52,9 +52,15 @@ export default function EditPage() {
   const pushUndo = useEditorStore((s) => s.pushUndo);
   const undo = useEditorStore((s) => s.undo);
   const redo = useEditorStore((s) => s.redo);
+  const resetEditor = useEditorStore((s) => s.resetEditor);
 
   const [showDoodle, setShowDoodle] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // 进入编辑页时重置编辑器状态（防止切换书籍时状态残留）
+  useEffect(() => {
+    resetEditor();
+  }, [bookId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // 筛选本书的页面，按 pageNumber 排序
   const bookPages = useMemo(
@@ -99,6 +105,38 @@ export default function EditPage() {
     }
   };
 
+  // 键盘快捷键
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // 在输入框中不触发快捷键
+      if (
+        e.target instanceof HTMLInputElement ||
+        e.target instanceof HTMLTextAreaElement ||
+        e.target instanceof HTMLSelectElement
+      ) return;
+
+      if ((e.ctrlKey || e.metaKey) && e.key === 'z' && !e.shiftKey) {
+        e.preventDefault();
+        undo();
+      }
+      if ((e.ctrlKey || e.metaKey) && (e.key === 'y' || (e.key === 'z' && e.shiftKey))) {
+        e.preventDefault();
+        redo();
+      }
+      if (e.key === 'Delete' || e.key === 'Backspace') {
+        if (selectedElements.length > 0 && currentPageData) {
+          e.preventDefault();
+          takeSnapshot();
+          selectedElements.forEach((id) => removeElement(activePageNumber, id));
+          clearSelection();
+        }
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+    // takeSnapshot is re-created each render and captured by closure
+  }, [selectedElements, currentPageData, undo, redo, activePageNumber, removeElement, clearSelection]); // eslint-disable-line react-hooks/exhaustive-deps
+
   /** 添加新元素 */
   const handleAddElement = (type: PageElementType) => {
     if (!currentPageData) return;
@@ -132,10 +170,28 @@ export default function EditPage() {
     addElement(activePageNumber, element);
   };
 
-  /** 图片上传处理 */
+  /** 图片上传处理（带大小限制和压缩） */
   const handleImageFile = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
+
+    // 文件大小限制 5MB
+    const MAX_SIZE = 5 * 1024 * 1024;
+    if (file.size > MAX_SIZE) {
+      alert("图片大小不能超过 5MB，请压缩后再上传。");
+      if (fileInputRef.current) fileInputRef.current.value = "";
+      return;
+    }
+
+    // localStorage 空间检查（预留至少 500KB 余量）
+    const used = new Blob(Object.values(localStorage)).size;
+    const available = 5 * 1024 * 1024; // 大多数浏览器限制 ~5MB
+    if (used > available - 512 * 1024) {
+      alert("存储空间不足，请清理一些旧书籍或页面后再上传。");
+      if (fileInputRef.current) fileInputRef.current.value = "";
+      return;
+    }
+
     if (!currentPageData) {
       addPage(bookId);
       // 等待页面创建完成后再添加图片
@@ -152,25 +208,56 @@ export default function EditPage() {
     if (fileInputRef.current) fileInputRef.current.value = "";
   };
 
-  /** 将图片文件转为元素 */
+  /** 将图片文件转为元素（自动压缩大图） */
   const addImageToPage = (pageNum: number, file: File) => {
     const reader = new FileReader();
     reader.onload = (ev) => {
-      const element: PageElement = {
-        id: generateId(),
-        type: "image",
-        x: 80,
-        y: 80,
-        width: 350,
-        height: 250,
-        data: {
-          src: ev.target?.result as string,
-          filter: { brightness: 100, contrast: 100, saturation: 100 },
-        } as ImageElementData,
-      };
-      addElement(pageNum, element);
+      const dataUrl = ev.target?.result as string;
+
+      // 大于 1MB 的图片用 Canvas 压缩
+      if (dataUrl.length > 1 * 1024 * 1024) {
+        const img = new window.Image();
+        img.onload = () => {
+          const canvas = document.createElement("canvas");
+          const maxDim = 800;
+          let { width, height } = img;
+          if (width > maxDim || height > maxDim) {
+            const ratio = Math.min(maxDim / width, maxDim / height);
+            width *= ratio;
+            height *= ratio;
+          }
+          canvas.width = width;
+          canvas.height = height;
+          const ctx = canvas.getContext("2d");
+          if (ctx) {
+            ctx.drawImage(img, 0, 0, width, height);
+            const compressed = canvas.toDataURL("image/jpeg", 0.7);
+            addImageElement(pageNum, compressed);
+          }
+        };
+        img.src = dataUrl;
+      } else {
+        addImageElement(pageNum, dataUrl);
+      }
     };
     reader.readAsDataURL(file);
+  };
+
+  /** 创建图片元素 */
+  const addImageElement = (pageNum: number, src: string) => {
+    const element: PageElement = {
+      id: generateId(),
+      type: "image",
+      x: 80,
+      y: 80,
+      width: 350,
+      height: 250,
+      data: {
+        src,
+        filter: { brightness: 100, contrast: 100, saturation: 100 },
+      } as ImageElementData,
+    };
+    addElement(pageNum, element);
   };
 
   /** 涂鸦保存 */

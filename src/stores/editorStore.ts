@@ -16,6 +16,8 @@ interface EditorState {
   setCurrentPage: (pageNum: number) => void
   loadPages: (pages: Page[]) => void
   getCurrentPage: () => Page | undefined
+  /** 切换书籍时重置编辑器状态 */
+  resetEditor: () => void
 
   // 元素
   addElement: (pageNum: number, element: PageElement) => void
@@ -66,6 +68,10 @@ export const useEditorStore = create<EditorState>()(
       setCurrentPage: (pageNum) => set({ currentPage: pageNum }),
 
       loadPages: (pages) => set({ pages, currentPage: 0 }),
+
+      /** 切换书籍时重置编辑器状态 */
+      resetEditor: () =>
+        set({ currentPage: 0, selectedElements: [], undoStack: [], redoStack: [] }),
 
       getCurrentPage: () => {
         const { pages, currentPage } = get()
