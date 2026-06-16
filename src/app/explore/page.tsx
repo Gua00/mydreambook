@@ -7,7 +7,7 @@ import { useEditorStore } from "@/stores/editorStore";
 import { useExploreStore } from "@/stores/exploreStore";
 import { Heart, MessageCircle, BookOpen, Clock, TrendingUp, Send, User } from "lucide-react";
 import type { DreamBook, Interaction } from "@/types";
-import { cn, generateId, now } from "@/lib/utils";
+import { cn } from "@/lib/utils";
 
 /** 单张公开书卡片 */
 function ExploreBookCard({
@@ -43,7 +43,7 @@ function ExploreBookCard({
   const isDark = book.style === "starry" || book.style === "dark";
 
   return (
-    <div className="bg-white rounded-xl book-shadow overflow-hidden animate-fade-in">
+    <div className="bg-white dark:bg-stone-800 rounded-xl book-shadow overflow-hidden animate-fade-in">
       {/* 封面 */}
       <Link href={`/share/${book.id}`} className="block">
         <div
@@ -196,8 +196,8 @@ export default function ExplorePage() {
       {/* 标题 */}
       <div className="flex items-center justify-between mb-8">
         <div>
-          <h1 className="text-2xl font-bold text-stone-800">🌍 公开墙</h1>
-          <p className="text-sm text-stone-500 mt-1">
+          <h1 className="text-2xl font-bold text-stone-800 dark:text-stone-100">🌍 公开墙</h1>
+          <p className="text-sm text-stone-500 dark:text-stone-400 mt-1">
             探索大家分享的梦想之书
           </p>
         </div>

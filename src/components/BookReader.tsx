@@ -87,7 +87,11 @@ function PageFace({ page, styleClass }: { page: Page; styleClass: string }) {
 function FlipBook({ pages, styleClass }: { pages: Page[]; styleClass: string }) {
   const bookRef = useRef<any>(null);
   const [currentPage, setCurrentPage] = useState(0);
+  const [mounted, setMounted] = useState(false);
   const totalPages = pages.length;
+
+  // 客户端挂载后再渲染 HTMLFlipBook（需要 DOM API）
+  useEffect(() => { setMounted(true); }, []);
 
   const onFlip = useCallback((e: any) => {
     setCurrentPage(e.data);
@@ -99,13 +103,11 @@ function FlipBook({ pages, styleClass }: { pages: Page[]; styleClass: string }) 
     }
   };
 
-  // 响应翻页按钮
   const goNext = () => goToPage(currentPage + 1);
   const goPrev = () => goToPage(currentPage - 1);
 
   return (
     <div className="flex-1 flex flex-col items-center justify-center p-4 bg-stone-100 dark:bg-stone-950 select-none">
-      {/* 按钮 + 书本容器 */}
       <div className="flex items-center gap-4 w-full max-w-[1000px] justify-center">
         <button
           onClick={goPrev}
@@ -117,7 +119,7 @@ function FlipBook({ pages, styleClass }: { pages: Page[]; styleClass: string }) 
         </button>
 
         <div className="flex-1 flex justify-center overflow-hidden">
-          {typeof window !== "undefined" && (
+          {mounted ? (
             <HTMLFlipBook
               ref={bookRef}
               width={400}
@@ -150,6 +152,14 @@ function FlipBook({ pages, styleClass }: { pages: Page[]; styleClass: string }) 
                 </div>
               ))}
             </HTMLFlipBook>
+          ) : (
+            /* 骨架占位，防止布局跳动 */
+            <div className="w-full max-w-[550px] book-shadow rounded-xl overflow-hidden bg-white dark:bg-stone-800 animate-pulse"
+              style={{ aspectRatio: "4/5" }}>
+              <div className="w-full h-full flex items-center justify-center">
+                <BookOpen className="size-12 text-stone-200 dark:text-stone-600" />
+              </div>
+            </div>
           )}
         </div>
 
@@ -163,7 +173,6 @@ function FlipBook({ pages, styleClass }: { pages: Page[]; styleClass: string }) 
         </button>
       </div>
 
-      {/* 页码指示 */}
       <div className="mt-4 flex items-center gap-2 text-xs text-stone-400 dark:text-stone-500">
         <BookOpen className="size-3" />
         <span>{currentPage + 1}</span>
